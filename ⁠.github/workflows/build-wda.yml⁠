@@ -1,10 +1,12 @@
 name: Build WDA Legacy (iOS 12.5.6)
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       wda_version:
-        description: 'Tag phiên bản WDA (< 4.0, khuyên dùng: v3.16.0, v3.17.0, v3.14.0)'
+        description: 'Tag phiên bản WDA (< 4.0)'
         required: true
         default: 'v3.16.0'
       bundle_id:
@@ -12,9 +14,12 @@ on:
         required: true
         default: 'com.facebook.WebDriverAgentRunner'
 
+env:
+  WDA_VER: ${{ github.event.inputs.wda_version || 'v3.16.0' }}
+  BUNDLE_ID: ${{ github.event.inputs.bundle_id || 'com.facebook.WebDriverAgentRunner' }}
+
 jobs:
   build-wda-ios12:
-    # Sử dụng macos-15 để đảm bảo tương thích tốt nhất với cấu trúc project Xcode cũ
     runs-on: macos-15
 
     steps:
@@ -22,11 +27,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: appium/WebDriverAgent
-          ref: ${{ github.event.inputs.wda_version }}
+          ref: ${{ env.WDA_VER }}
 
       - name: 2. Khởi tạo thư viện phụ thuộc (Carthage / Scripts)
         run: |
-          # Các bản WDA < 4.0 đôi khi có script bootstrap.sh để tải RoutingHTTPServer/YYCache
           if [ -f "./Scripts/bootstrap.sh" ]; then
             chmod +x ./Scripts/bootstrap.sh
             ./Scripts/bootstrap.sh -d || true
@@ -34,12 +38,8 @@ jobs:
 
       - name: 3. Ép cấu hình Xcode hỗ trợ iOS 12.5.6 (arm64)
         run: |
-          echo "Đang điều chỉnh project.pbxproj về chuẩn iOS 12.0..."
-          # Hạ toàn bộ mốc Deployment Target trong file cấu hình xuống iOS 12.0
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/IPHONEOS_DEPLOYMENT_TARGET = 12.0;/g' WebDriverAgent.xcodeproj/project.pbxproj
-          
-          # Đổi Bundle ID theo thông số đầu vào
-          sed -i '' "s/com.facebook.WebDriverAgentRunner/${{ github.event.inputs.bundle_id }}/g" WebDriverAgent.xcodeproj/project.pbxproj
+          sed -i '' "s/com.facebook.WebDriverAgentRunner/${{ env.BUNDLE_ID }}/g" WebDriverAgent.xcodeproj/project.pbxproj
 
       - name: 4. Biên dịch WebDriverAgentRunner (Unsigned Build)
         run: |
@@ -52,7 +52,7 @@ jobs:
             ARCHS="arm64" \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET="12.0" \
-            PRODUCT_BUNDLE_IDENTIFIER="${{ github.event.inputs.bundle_id }}" \
+            PRODUCT_BUNDLE_IDENTIFIER="${{ env.BUNDLE_ID }}" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -64,23 +64,15 @@ jobs:
         run: |
           mkdir -p Payload
           APP_PATH="./build_output/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app"
-          
-          if [ ! -d "$APP_PATH" ]; then
-            echo "Lỗi: Không tìm thấy gói .app sau khi build!"
-            exit 1
-          fi
-
-          # Xóa các thư mục chữ ký rỗng để tránh lỗi khi ký lại bằng zsign/Sideloadly
           rm -rf "$APP_PATH/_CodeSignature"
-          
           cp -r "$APP_PATH" Payload/
-          zip -r -9 "WDA_${{ github.event.inputs.wda_version }}_iOS12_Unsigned.ipa" Payload
+          zip -r -9 "WDA_${{ env.WDA_VER }}_iOS12_Unsigned.ipa" Payload
 
       - name: 6. Tải file IPA lên Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WDA-${{ github.event.inputs.wda_version }}-iOS12-IPA
+          name: WDA-${{ env.WDA_VER }}-iOS12-IPA
           path: |
-            WDA_${{ github.event.inputs.wda_version }}_iOS12_Unsigned.ipa
+            WDA_${{ env.WDA_VER }}_iOS12_Unsigned.ipa
             ./build_output/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app
           retention-days: 30
